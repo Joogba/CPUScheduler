@@ -177,7 +177,9 @@ int insert_queue(int pid, int priority, int computing_time) // 완료
 
 	temp->waiting_time = 0;
 	temp->service_time = computing_time;
-	temp->response_ratio = HRR(temp->waiting_time, temp->service_time);
+	temp->response_ratio = 
+		
+		(temp->waiting_time, temp->service_time);
 
 	add_waiting_time(1);
 	
