@@ -1,11 +1,17 @@
 ﻿#include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
+
+
 
 //HRRN
 
-#define MAX_QUEUE 5
+#define MAX_QUEUE 2
 
 #define HRR(wt, st) ((float)wt+(float)st)/(float)st  // 응답률 매크로함수
+#define ABS(X) ((X) < 0 ? -(X) : (X))					// 절댓값
+
+#define EPSILON 0.000001  // float 비교 오차
 
 enum Priority_Set {
 	Realtime = 0,
@@ -26,6 +32,8 @@ struct priority_queue {
 	int priority;			// 우선순위 입력은 받지만 사용 x
 	int computing_time;		// 연산시간
 	int service_time;		// 원래는 서비스타임을 예상해서 정해줘야 하지만 일단 computing_time으로 세팅
+	int input_time;
+
 
 	float response_ratio;	//응답률
 	int waiting_time;		//대기시간
@@ -43,24 +51,27 @@ struct queue_head {
 void initialize_queue(void);								// 모든 헤드큐 초기화
 int insert_queue(int pid, int priority, int computing_time);			// 큐 삽입
 int delete_queue(int priority);								// 큐 삭제
+void delete_node(queue_pointer p_node);			// 큐에서 노드 삭제
 void print_queue(void);										// 모든 노드 출력
 
 void insert_after(queue_pointer new, queue_pointer des);	// des의 뒤에 new 추가
-queue_pointer find_node_for_insert(int priority);			// 우선순위로 어느 큐에 넣을지 정함 (이후에 응답률로 변경)
+queue_pointer find_node_for_insert(int priority, float hrr);			// 우선순위로 어느 큐에 넣을지 정함 (이후에 응답률로 변경)
 void free_all_node(void);									// 모든 노드 메모리 해제
 
 void add_waiting_time(int wt);								// 대기시간 증가
-void complete_process(queue_pointer node);					// 프로세스 작업 완료 후 출력시켜주기
-void schedule_process();									// 프로세스들 스케쥴링
+
 void print_node(queue_pointer p_node);						// 하나의 노드정보 출력
+void print_node_tat(queue_pointer p_node, int return_time);
 int get_queue_id(queue_pointer p_node);						// 해당 노드가 속한 큐 반환
 void update_node(queue_pointer p_node);						// 노드의 hrr 업데이트
-float hrr(int wt, int st);
 
+void schedule_process();									// 프로세스 스케쥴링
+void schedule_process_while();								// 처리할 프로세스가 없을때까지 스케쥴링
 
 // Variables =======================================================
-head_pointer queueArr[5]; // 헤드 노드 realtime, q1 q2 q3 q4
-int t = 20;
+head_pointer queueArr[MAX_QUEUE]; // 헤드 노드 realtime, q1 q2 q3 q4
+
+int time = 0; // 흐른 시간
 
 int main()
 {
@@ -84,26 +95,34 @@ int main()
 		
 		switch (fmode)
 		{
-		case 0: // 스케쥴링
-			insert_queue(fpid, fpriority, fctime);
+		case 0: // 프로세스 추가
+			printf("\n\n프로세스 삽입\n");
+			add_waiting_time(1);
+			insert_queue(fpid, fpriority, fctime);			
 			print_queue();
 			break;
-		case 1: // 프로세스 추가
-			
-			//print_queue();
+		case 1: // 
+			printf("\n\n프로세스 스케쥴 실행\n");
+			schedule_process();
+			print_queue();
 			break;
 		case -1:
-			printf("종료\n");
-			return 0;
+			printf("입력 완료\n");
+			//return 0;
 			break;
 		default:
 			printf("해당하는 명령이 없습니다 입력 : %d\n", fmode);
 			break;
 		}
-		add_waiting_time(1);
+		
 	}
 
-	print_queue();
+	
+	schedule_process_while();
+
+	// 파일다읽으면 스케쥴링
+	
+	printf("종료\n");
 	fclose(datafile);
 	free_all_node();
 	return 0;
@@ -140,6 +159,7 @@ int insert_queue(int pid, int priority, int computing_time) // 완료
 	temp->right_link = NULL;
 	temp->pid = pid;
 	temp->computing_time = computing_time;
+	temp->input_time = time;
 
 	if(priority > 30)
 		temp->priority = 31;
@@ -151,7 +171,7 @@ int insert_queue(int pid, int priority, int computing_time) // 완료
 	temp->response_ratio = HRR(temp->waiting_time, temp->service_time);
 
 	// 3개의 큐중 어느 큐에 넣을지 정함
-	insert_after(temp, find_node_for_insert(temp->priority));
+	insert_after(temp, find_node_for_insert(temp->priority, temp->response_ratio));
 
 	return 0;
 }
@@ -199,21 +219,17 @@ void insert_after(queue_pointer new, queue_pointer des) // 완료
 		new->left_link = des;
 		des->right_link = new;
 	}
-	printf("노드 삽입 || 우선순위 : %d\n", new->priority);
+	//printf("노드 삽입 || 우선순위 : %d\n", new->priority);
 }
 
-queue_pointer find_node_for_insert(int priority) // 완료
+queue_pointer find_node_for_insert(int priority, float hrr) // 완료
 {
 	// 몇번째 큐에 들어갈지 정해준다
 	int idx = 0;
 	if (priority < 0)
 		idx = Realtime;
-	else if (priority > 0 && priority <= 30)
-	{
-		idx = ((priority - 1) / 10) + 1; // Q1, Q2, Q3
-	}
-	else if (priority > 30)
-		idx = Q4;
+	else
+		idx = Q1;
 
 	head_pointer head = queueArr[idx];
 	queue_pointer temp = head->right_link;
@@ -224,12 +240,11 @@ queue_pointer find_node_for_insert(int priority) // 완료
 
 	while (temp != NULL)
 	{
-
-		if (temp->priority > priority)
-			return temp->left_link;
-		else if (temp->priority <= priority && temp->right_link == NULL)
+		if (temp->response_ratio < hrr)
+			return temp->right_link;
+		else if (temp->response_ratio >= hrr && temp->right_link == NULL)
 			return temp;
-		else if (temp->priority <= priority && temp->right_link->priority >= priority)
+		else if (temp->response_ratio >= hrr && temp->right_link->response_ratio <= hrr)
 			return temp;
 
 		temp = temp->right_link;
@@ -277,14 +292,7 @@ void add_waiting_time(int wt)
 	}
 }
 
-void complete_process(queue_pointer node)
-{
 
-}// 프로세스 작업 완료 후 출력시켜주기
-void schedule_process()
-{
-
-}
 
 void print_node(queue_pointer p_node)
 {
@@ -319,12 +327,40 @@ void print_node(queue_pointer p_node)
 		break;
 	}
 
-	printf("%d\t\t %s\t\t %d\t\t\ %d\t\t %.1f\t\t %d\t\t\n", p_node->pid, temp ,p_node->priority, p_node->computing_time, p_node->response_ratio, p_node->waiting_time);
+	printf("%d\t\t%-10s\t\t%d\t\t%.4f\t\t%d\t\t\n", p_node->pid, temp , p_node->computing_time, p_node->response_ratio, p_node->waiting_time);
+}
+
+void print_node_tat(queue_pointer p_node, int return_time)
+{
+	if (p_node == NULL)
+		return;
+
+	char* temp = NULL;
+	int temp_qid = 0;
+
+	temp_qid = get_queue_id(p_node);
+
+	switch (temp_qid)
+	{
+	case Realtime:
+		temp = "real_time";
+		break;
+
+	case Q1:
+		temp = "Q1";
+		break;
+
+	default:
+		temp = "in nowhere";
+		break;
+	}
+
+	printf("%d\t\t%-10s\t\t%d\t\t%.4f\t\t%d\t\t%d\t\t\n", p_node->pid, temp, p_node->computing_time, p_node->response_ratio, p_node->waiting_time, return_time);
 }
 
 void print_queue(void) // 완료
 {
-	printf("Process ID \tQueue ID \tpriority \tcomputing_time \tResponce_Ratio \tWaiting_time\n");
+	printf("Process ID \tQueue ID \tcomputing_time \tResponce_Ratio \tWaiting_time \tturn_around_time\n\n");
 	for (int i = 0; i < 5; i++)
 	{
 		if (queueArr[i]->right_link == NULL)
@@ -366,7 +402,126 @@ void update_node(queue_pointer p_node)
 	p_node->response_ratio = HRR(p_node->waiting_time, p_node->service_time);
 }
 
-float hrr(int wt, int st)
+queue_pointer get_max_hrr(int idx)
 {
-	return ((float)wt + (float)st) / (float)st;
+	float max_hrr = 0;
+	queue_pointer temp = queueArr[idx]->right_link;
+	queue_pointer max_hrr_node = NULL;
+
+	while (temp != NULL)
+	{
+		if (max_hrr < temp->response_ratio) // 크면
+		{
+			max_hrr = temp->response_ratio;
+			max_hrr_node = temp;
+		}
+		else if (ABS(max_hrr - temp->response_ratio) < EPSILON) // 같으면
+		{
+			if (max_hrr_node->waiting_time <= temp->waiting_time) // 대기시간으로 비교
+			{
+				max_hrr = temp->response_ratio;
+				max_hrr_node = temp;
+			}
+
+		}
+		temp = temp->right_link;
+	}
+
+	if(max_hrr_node != NULL)
+		printf("max hrr = %d process\n", max_hrr_node->pid);
+
+	return max_hrr_node;
+}
+
+void node_to_top(queue_pointer p_node, int idx) 
+{
+	// 큐에서 뺀다
+	if (p_node == NULL)
+		return;
+
+	if (idx > 4 || idx < 0)
+		return;
+
+	delete_node(p_node);
+
+	// 큐의 맨앞으로
+	insert_after(p_node,queueArr[idx] );
+	
+}
+
+void schedule_process()
+{
+	
+	int turn_arround_time = 0;
+	int idx = 0;
+	queue_pointer temp = NULL;
+
+	if (queueArr[Realtime]->right_link != NULL)
+	{
+		//실시간 프로세스가 있으면
+		idx = Realtime;
+		temp = queueArr[idx]->right_link;
+	}
+	else if(queueArr[Q1]->right_link != NULL)
+	{
+		//실시간 프로세스가 없으면 일반큐
+		idx = Q1;
+		node_to_top(get_max_hrr(Q1), Q1);
+		temp = queueArr[idx]->right_link;
+	}
+
+	if (temp == NULL)
+		return;
+
+	time += temp->computing_time;
+	turn_arround_time = time - temp->input_time;
+	
+	
+	print_node_tat(temp,turn_arround_time);
+
+	delete_node(temp);
+	add_waiting_time(temp->computing_time);
+
+	free(temp);
+
+	return;
+}
+
+void delete_node(queue_pointer p_node)
+{
+	if (p_node->right_link != NULL)	//마지막노드 아닐때
+	{
+		p_node->left_link->right_link = p_node->right_link;
+		p_node->right_link->left_link = p_node->left_link;
+		
+	}
+	else // 마지막 노드일때
+	{
+		p_node->left_link->right_link = NULL;
+	}
+
+	p_node->left_link = NULL;
+	p_node->right_link = NULL;
+
+	return ;
+}
+
+void schedule_process_while()
+{
+	bool is_remain = false;
+	while (1)
+	{
+		is_remain = false;
+		for (int i = 0; i < MAX_QUEUE; i++)
+		{
+			if (queueArr[i]->right_link != NULL)
+				is_remain = true;
+		}
+
+		if (is_remain == false)
+			break;
+
+		schedule_process();
+		print_queue();
+	}
 }
