@@ -10,6 +10,7 @@
 
 #define HRR(wt, st) ((float)wt+(float)st)/(float)st  // 응답률 매크로함수
 #define ABS(X) ((X) < 0 ? -(X) : (X))					// 절댓값
+#define DIV(sum, cnt) (float)sum/(float)cnt		// 나눗셈
 
 #define EPSILON 0.000001  // float 비교 오차
 
@@ -25,20 +26,26 @@ enum Priority_Set {
 
 typedef struct priority_queue* queue_pointer;
 struct priority_queue {
-
 	queue_pointer left_link;
 	queue_pointer right_link;
-	int pid;
+	int pid;				// Process id
 	int priority;			// 우선순위 입력은 받지만 사용 x
 	int computing_time;		// 연산시간
-	int service_time;		// 원래는 서비스타임을 예상해서 정해줘야 하지만 일단 computing_time으로 세팅
-	int input_time;
+	int service_time;		// 원래는 서비스타임(또는 Burst Time)을 예상해서 정해줘야 하지만 일단 computing_time으로 세팅
+	int input_time;			// 큐에 들어간 시간
 
 
-	float response_ratio;	//응답률
+	float response_ratio;	//응답률 
 	int waiting_time;		//대기시간
-
 };
+
+// Variables =======================================================
+
+head_pointer queueArr[MAX_QUEUE];	// 헤드 노드 realtime, q1
+int time = 0;						// 흐른 시간
+int sum_turn_around_time = 0;		// 평균 반환시간을 구하기 위한 모든 반환시간의 합
+int scheduling_count = 0;			// 스케쥴링된 프로세스의 갯수
+
 
 typedef struct queue_head* head_pointer;
 struct queue_head {
@@ -48,34 +55,35 @@ struct queue_head {
 
 
 // Methods =======================================================
-void initialize_queue(void);								// 모든 헤드큐 초기화
-int insert_queue(int pid, int priority, int computing_time);			// 큐 삽입
-int delete_queue(int priority);								// 큐 삭제
-void delete_node(queue_pointer p_node);			// 큐에서 노드 삭제
-void print_queue(void);										// 모든 노드 출력
 
-void insert_after(queue_pointer new, queue_pointer des);	// des의 뒤에 new 추가
-queue_pointer find_node_for_insert(int priority, float hrr);			// 우선순위로 어느 큐에 넣을지 정함 (이후에 응답률로 변경)
+//  기본 큐 관련 메서드 ==-=-=-=-=-=-=
+
+void initialize_queue(void);								// 모든 헤드큐 초기화
+int insert_queue(int pid, int priority, int computing_time);// 큐 삽입 명령 처리
+void delete_node(queue_pointer p_node);						// 큐에서 노드 삭제
+void print_queue(void);										// 모든 노드 출력
+void insert_after(queue_pointer new, queue_pointer des);	// des 노드의 뒤에 new 추가
 void free_all_node(void);									// 모든 노드 메모리 해제
+void print_node(queue_pointer p_node);						// 하나의 노드정보 출력
+void print_node_tat(queue_pointer p_node, int return_time); // 턴어라운드 타임을 포함한 노드정보 출력
+int get_queue_id(queue_pointer p_node);						// 해당 노드가 속한 큐 반환
+
+queue_pointer find_node_for_insert(int priority, float hrr);// 우선순위로 어느 큐에 넣을지 정함(realtime process고려)
+															// rtp 가아닌것은 hrr을 기준으로 삽입위치 정함
+
+//  hrr 관련 메서드 ==-=-=-=-=-=-=
 
 void add_waiting_time(int wt);								// 대기시간 증가
-
-void print_node(queue_pointer p_node);						// 하나의 노드정보 출력
-void print_node_tat(queue_pointer p_node, int return_time);
-int get_queue_id(queue_pointer p_node);						// 해당 노드가 속한 큐 반환
-void update_node(queue_pointer p_node);						// 노드의 hrr 업데이트
-
+void update_node(queue_pointer p_node);						// 노드의 hrr 필드 업데이트
 void schedule_process();									// 프로세스 스케쥴링
 void schedule_process_while();								// 처리할 프로세스가 없을때까지 스케쥴링
 
-// Variables =======================================================
-head_pointer queueArr[MAX_QUEUE]; // 헤드 노드 realtime, q1 q2 q3 q4
 
-int time = 0; // 흐른 시간
 
 int main()
 {
 	initialize_queue();
+
 	FILE* datafile;
 	fopen_s(&datafile, "input_data.txt", "r");
 	if (datafile == NULL)
@@ -96,33 +104,32 @@ int main()
 		switch (fmode)
 		{
 		case 0: // 프로세스 추가
-			printf("\n\n프로세스 삽입\n");
+			insert_queue(fpid, fpriority, fctime);		
 			add_waiting_time(1);
-			insert_queue(fpid, fpriority, fctime);			
 			print_queue();
 			break;
 		case 1: // 
-			printf("\n\n프로세스 스케쥴 실행\n");
 			schedule_process();
 			print_queue();
 			break;
 		case -1:
 			printf("입력 완료\n");
-			//return 0;
 			break;
 		default:
 			printf("해당하는 명령이 없습니다 입력 : %d\n", fmode);
 			break;
 		}
 		
-	}
-
-	
-	schedule_process_while();
-
-	// 파일다읽으면 스케쥴링
+	}	
+	schedule_process_while(); // 큐에있는 나머지 프로세스 스케쥴링
 	
 	printf("종료\n");
+
+	float avg_tat = DIV(sum_turn_around_time, scheduling_count);
+
+	printf("HRRN scheduling 평균 반환 시간 : %3.f \n", avg_tat);
+	printf("HRRN scheduling 정규화된 평균 반환 시간 : %3.f \n", (float)sum_turn_around_time/avg_tat);
+
 	fclose(datafile);
 	free_all_node();
 	return 0;
@@ -132,7 +139,7 @@ void initialize_queue(void) // 완료
 {
 	memset(queueArr, NULL, sizeof(queue_pointer) * 5);
 	head_pointer head;
-	for (int i = 0; i < 5; i++) // 큐의 헤드 초기화;
+	for (int i = 0; i < MAX_QUEUE; i++) // 큐의 헤드 초기화;
 	{
 		queueArr[i] = malloc(sizeof(struct queue_head));
 		if (queueArr[i] == NULL)
@@ -175,36 +182,6 @@ int insert_queue(int pid, int priority, int computing_time) // 완료
 
 	return 0;
 }
-int delete_queue(int priority) // 완료
-{
-	head_pointer head = queueArr[(priority - 1) / 10]; // 우선순위가 해당하는 큐의 헤드
-
-	if (head->right_link == NULL)
-	{
-		printf("해당 큐에 노드가 없습니다.\n");
-		return -1;
-	}
-
-	queue_pointer temp = head->right_link;
-
-	if (temp->priority <= priority)
-	{
-		printf("노드 삭제 || 입력 노드 : %d ,실제 삭제 노드 : %d\n", priority, temp->priority);
-
-		temp->left_link->right_link = temp->right_link;
-		temp->right_link->left_link = temp->left_link;
-		free(temp);
-
-		return 0;
-	}
-	else
-	{
-		printf("해당 우선순위보다 높거나 같은 노드가 없습니다.\n");
-		return -1;
-	}
-
-}
-
 void insert_after(queue_pointer new, queue_pointer des) // 완료
 {
 	if (des->right_link == NULL)	// 마지막노드일때
@@ -361,7 +338,7 @@ void print_node_tat(queue_pointer p_node, int return_time)
 void print_queue(void) // 완료
 {
 	printf("Process ID \tQueue ID \tcomputing_time \tResponce_Ratio \tWaiting_time \tturn_around_time\n\n");
-	for (int i = 0; i < 5; i++)
+	for (int i = 0; i < MAX_QUEUE; i++)
 	{
 		if (queueArr[i]->right_link == NULL)
 			continue;
@@ -475,6 +452,8 @@ void schedule_process()
 
 	time += temp->computing_time;
 	turn_arround_time = time - temp->input_time;
+	sum_turn_around_time += turn_arround_time;
+	scheduling_count++;
 	
 	
 	print_node_tat(temp,turn_arround_time);
@@ -522,6 +501,6 @@ void schedule_process_while()
 			break;
 
 		schedule_process();
-		print_queue();
+		//print_queue();
 	}
 }
