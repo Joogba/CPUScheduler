@@ -16,10 +16,7 @@
 
 enum Priority_Set {
 	Realtime = 0,
-	Q1 = 1,
-	Q2 = 2,
-	Q3 = 3,
-	Q4 = 4,
+	Q1 = 1
 };
 
 // Structs =======================================================
@@ -39,19 +36,21 @@ struct priority_queue {
 	int waiting_time;		//대기시간
 };
 
-// Variables =======================================================
-
-head_pointer queueArr[MAX_QUEUE];	// 헤드 노드 realtime, q1
-int time = 0;						// 흐른 시간
-int sum_turn_around_time = 0;		// 평균 반환시간을 구하기 위한 모든 반환시간의 합
-int scheduling_count = 0;			// 스케쥴링된 프로세스의 갯수
-
-
 typedef struct queue_head* head_pointer;
 struct queue_head {
 	queue_pointer left_link;
 	queue_pointer right_link;
 };
+
+// Variables =======================================================
+
+head_pointer queueArr[MAX_QUEUE];	// 헤드 노드 realtime, q1
+int time = 0;						// 흐른 시간
+int sum_turn_around_time = 0;		// 평균 반환시간을 구하기 위한 모든 반환시간의 합
+float sum_normal_turn_around_time = 0;
+int scheduling_count = 0;			// 스케쥴링된 프로세스의 갯수
+
+
 
 
 // Methods =======================================================
@@ -92,6 +91,8 @@ int main()
 		return 0;
 	}
 
+	printf("Process ID \tQueue ID \tcomputing_time \tResponce_Ratio \tWaiting_time \tturn_around_time\n\n");
+
 	int fmode, fpid, fpriority, fctime;
 	while (!feof(datafile))
 	{
@@ -104,16 +105,15 @@ int main()
 		switch (fmode)
 		{
 		case 0: // 프로세스 추가
-			insert_queue(fpid, fpriority, fctime);		
-			add_waiting_time(1);
-			print_queue();
+			insert_queue(fpid, fpriority, fctime);	
+			
 			break;
-		case 1: // 
+		case 1: // 스케쥴링
 			schedule_process();
-			print_queue();
+			
 			break;
 		case -1:
-			printf("입력 완료\n");
+			
 			break;
 		default:
 			printf("해당하는 명령이 없습니다 입력 : %d\n", fmode);
@@ -123,12 +123,14 @@ int main()
 	}	
 	schedule_process_while(); // 큐에있는 나머지 프로세스 스케쥴링
 	
-	printf("종료\n");
+	printf("\n\n종료\n");
 
 	float avg_tat = DIV(sum_turn_around_time, scheduling_count);
+	float avg_nm_tat = DIV(sum_normal_turn_around_time , scheduling_count);
 
-	printf("HRRN scheduling 평균 반환 시간 : %3.f \n", avg_tat);
-	printf("HRRN scheduling 정규화된 평균 반환 시간 : %3.f \n", (float)sum_turn_around_time/avg_tat);
+	printf("%d %d %d", sum_turn_around_time, time, scheduling_count);
+	printf("HRRN scheduling 평균 반환 시간 : %.3f \n", avg_tat);
+	printf("HRRN scheduling 정규화된 평균 반환 시간 : %.3f \n", avg_nm_tat);
 
 	fclose(datafile);
 	free_all_node();
@@ -177,7 +179,8 @@ int insert_queue(int pid, int priority, int computing_time) // 완료
 	temp->service_time = computing_time;
 	temp->response_ratio = HRR(temp->waiting_time, temp->service_time);
 
-	// 3개의 큐중 어느 큐에 넣을지 정함
+	add_waiting_time(1);
+	
 	insert_after(temp, find_node_for_insert(temp->priority, temp->response_ratio));
 
 	return 0;
@@ -196,7 +199,7 @@ void insert_after(queue_pointer new, queue_pointer des) // 완료
 		new->left_link = des;
 		des->right_link = new;
 	}
-	//printf("노드 삽입 || 우선순위 : %d\n", new->priority);
+	
 }
 
 queue_pointer find_node_for_insert(int priority, float hrr) // 완료
@@ -291,17 +294,9 @@ void print_node(queue_pointer p_node)
 		temp = "Q1";
 		break;
 
-	case Q2:
-		temp = "Q2";
-		break;
+	default:
+		temp = "default";
 
-	case Q3:
-		temp = "Q3";
-		break;
-
-	case Q4:
-		temp = "Q4";
-		break;
 	}
 
 	printf("%d\t\t%-10s\t\t%d\t\t%.4f\t\t%d\t\t\n", p_node->pid, temp , p_node->computing_time, p_node->response_ratio, p_node->waiting_time);
@@ -404,8 +399,7 @@ queue_pointer get_max_hrr(int idx)
 		temp = temp->right_link;
 	}
 
-	if(max_hrr_node != NULL)
-		printf("max hrr = %d process\n", max_hrr_node->pid);
+	
 
 	return max_hrr_node;
 }
@@ -453,10 +447,12 @@ void schedule_process()
 	time += temp->computing_time;
 	turn_arround_time = time - temp->input_time;
 	sum_turn_around_time += turn_arround_time;
+	sum_normal_turn_around_time += (float)turn_arround_time / (float)temp->computing_time;
 	scheduling_count++;
 	
 	
 	print_node_tat(temp,turn_arround_time);
+	
 
 	delete_node(temp);
 	add_waiting_time(temp->computing_time);
@@ -501,6 +497,6 @@ void schedule_process_while()
 			break;
 
 		schedule_process();
-		//print_queue();
+		
 	}
 }
